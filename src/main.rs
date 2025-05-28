@@ -1,9 +1,12 @@
-use std::collections::BinaryHeap;
+use std::{collections::BinaryHeap, thread::current};
 
-use bevy::{prelude::*, window::PrimaryWindow};
+use bevy::{
+    color::palettes::css::*, platform::collections::HashMap, prelude::*,
+    text::cosmic_text::ttf_parser::loca, window::PrimaryWindow,
+};
 use bevy_egui::{
     EguiContextPass, EguiContexts, EguiPlugin,
-    egui::{self, Slider, style::HandleShape},
+    egui::{self, Slider, TextStyle, style::HandleShape},
 };
 use itertools::Itertools;
 use rand::prelude::*;
@@ -33,7 +36,18 @@ struct BoidsParameters {
     min_velocity: f32,
 }
 
+#[derive(Debug)]
+struct GridBoid {
+    entity: Entity,
+    heading: Vec2,
+    position: Vec2,
+}
+
+#[derive(Resource)]
+struct SpatialGrid(HashMap<(i32, i32), Vec<GridBoid>>);
+
 const BOID_SIZE: f32 = 3.0;
+// const GRID_SIZE: f32 = BOID_SIZE * 10.0;
 
 fn main() {
     App::new()
@@ -41,6 +55,8 @@ fn main() {
             primary_window: Some(Window {
                 title: "Boids".into(),
                 resolution: (800., 600.).into(),
+                // https://bevy-cheatbook.github.io/platforms/wasm/webpage.html
+                // canvas: Some("#boids".to_owned()),
                 ..default()
             }),
             ..default()
@@ -58,11 +74,18 @@ fn main() {
             speed: 25.0,
             min_velocity: 0.5,
         })
+        .insert_resource(SpatialGrid(HashMap::new()))
         .add_systems(Startup, setup_camera)
         .add_systems(Startup, spawn_boids)
         .add_systems(EguiContextPass, egui_system)
-        .add_systems(Update, update_boids)
-        .add_systems(Update, wrap_boids)
+        .add_systems(
+            Update,
+            (
+                build_spatial_grid.before(update_boids),
+                update_boids,
+                wrap_boids,
+            ),
+        )
         .run();
 }
 
@@ -135,6 +158,48 @@ impl Ord for LocalBoid {
     }
 }
 
+fn grid_index(position: Vec2, grid_size: f32) -> (i32, i32) {
+    let z = (
+        (position.x / grid_size) as i32,
+        (position.y / grid_size) as i32,
+    );
+
+    // dbg!(position, z, grid_size);
+    // panic!();
+    z
+}
+
+fn grid_size(local_distance: f32) -> f32 {
+    local_distance / 2.0_f32.sqrt()
+}
+
+fn build_spatial_grid(
+    boids_query: Query<(Entity, &Boid, &Transform)>,
+    mut spatial_grid: ResMut<SpatialGrid>,
+    boids_parameters: Res<BoidsParameters>,
+) {
+    // TODO: If the local query distance has changed, then clear entire spatial grid
+    spatial_grid.0.clear();
+    // for value in spatial_grid.0.values_mut() {
+    //     value.clear();
+    // }
+
+    for (entity, boid, transform) in &boids_query {
+        spatial_grid
+            .0
+            .entry(grid_index(
+                transform.translation.xy(),
+                grid_size(boids_parameters.local_distance),
+            ))
+            .or_insert(Vec::new())
+            .push(GridBoid {
+                entity,
+                heading: boid.heading,
+                position: transform.translation.xy(),
+            });
+    }
+}
+
 // Wrapped distance function
 // Considers boids on either side of the screen to be close
 fn toroidal_distance(a: Vec2, b: Vec2, width: f32, height: f32) -> Vec2 {
@@ -159,40 +224,85 @@ fn local_n_boid_query(
     local_distance: f32,
     screen_width: f32,
     screen_height: f32,
+    spatial_grid: &SpatialGrid,
 ) -> Vec<LocalBoid> {
-    let local_boids = positions_and_headings
-        .iter()
-        .filter(|(other_entity, _, _)| *other_entity != boid)
-        .map(|(_, other_position, other_heading)| {
-            // Wrap with Reverse as min-heap instead of default max
-            std::cmp::Reverse(LocalBoid {
-                distance: toroidal_distance(
-                    boid_position,
-                    *other_position,
-                    // The actual width and height of the toroidal space extends one boid width on either edge
-                    screen_width + BOID_SIZE * 2.0,
-                    screen_height + BOID_SIZE * 2.0,
-                )
-                .length_squared(),
-                position: *other_position,
-                heading: *other_heading,
-            })
-        });
+    // let local_boids = positions_and_headings
+    //     .iter()
+    //     .filter(|(other_entity, _, _)| *other_entity != boid)
+    //     .map(|(_, other_position, other_heading)| {
+    //         // Wrap with Reverse as min-heap instead of default max
+    //         std::cmp::Reverse(LocalBoid {
+    //             distance: toroidal_distance(
+    //                 boid_position,
+    //                 *other_position,
+    //                 // The actual width and height of the toroidal space extends one boid width on either edge
+    //                 screen_width + BOID_SIZE * 2.0,
+    //                 screen_height + BOID_SIZE * 2.0,
+    //             )
+    //             .length_squared(),
+    //             position: *other_position,
+    //             heading: *other_heading,
+    //         })
+    //     });
 
-    // Construct min-heap
-    let mut binary_heap = BinaryHeap::from_iter(local_boids);
+    // // Construct min-heap
+    // let mut binary_heap = BinaryHeap::from_iter(local_boids);
 
-    let mut local = Vec::new();
+    // let mut local = Vec::new();
 
-    while let Some(std::cmp::Reverse(local_boid)) = binary_heap.pop() {
-        if local_boid.distance <= local_distance {
-            local.push(local_boid);
-        } else {
-            break;
-        }
-    }
+    // while let Some(std::cmp::Reverse(local_boid)) = binary_heap.pop() {
+    //     if local_boid.distance <= local_distance {
+    //         local.push(local_boid);
+    //     } else {
+    //         break;
+    //     }
+    // }
 
-    local
+    let local_grid_cells = [
+        (-1, -1),
+        (-1, 0),
+        (0, -1),
+        (1, 1),
+        (1, 0),
+        (0, 1),
+        (0, 0),
+        (1, -1),
+        (-1, 1),
+    ];
+
+    let grid_size = grid_size(local_distance);
+    let current_grid_cell = grid_index(boid_position, grid_size);
+
+    local_grid_cells
+        .into_iter()
+        .filter_map(|(x, y)| {
+            spatial_grid
+                .0
+                .get(&(current_grid_cell.0 + x, current_grid_cell.1 + y))
+                .map(|local_cell_boids| {
+                    local_cell_boids.iter().filter_map(|local_cell_boid| {
+                        let distance_squared = toroidal_distance(
+                            boid_position,
+                            local_cell_boid.position,
+                            screen_width + BOID_SIZE * 2.0,
+                            screen_height + BOID_SIZE * 2.0,
+                        )
+                        .length_squared();
+
+                        if distance_squared < local_distance.powf(2.0) {
+                            Some(LocalBoid {
+                                distance: distance_squared.sqrt(),
+                                heading: local_cell_boid.heading,
+                                position: local_cell_boid.position,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                })
+        })
+        .flatten()
+        .collect_vec()
 }
 
 fn calculate_alignment(
@@ -266,6 +376,7 @@ fn update_boids(
     time: Res<Time>,
     boids_parameters: Res<BoidsParameters>,
     windows: Query<&Window, With<PrimaryWindow>>,
+    spatial_grid: Res<SpatialGrid>,
 ) {
     let delta = time.delta_secs();
     let window = windows.single().expect("No windw1!");
@@ -283,6 +394,7 @@ fn update_boids(
             boids_parameters.local_distance,
             window.width(),
             window.height(),
+            &spatial_grid,
         );
 
         let alignment = calculate_alignment(
