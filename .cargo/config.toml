@@ -1,2 +1,15 @@
+[unstable]
+codegen-backend = true
+
+[profile.dev]
+codegen-backend = "cranelift"
+
 [target.wasm32-unknown-unknown]
 runner = "wasm-server-runner"
+
+[target.x86_64-pc-windows-gnu]
+linker = "/usr/bin/clang"
+rustflags = [
+   "-C",
+   "link-arg=--ld-path=/usr/bin/mold",
+]
