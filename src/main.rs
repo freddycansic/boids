@@ -1,11 +1,14 @@
 use std::collections::BinaryHeap;
 
-use bevy::{prelude::*, window::PrimaryWindow};
+use bevy::{
+    ecs::entity::EntityHashMap, platform::collections::HashMap, prelude::*, window::PrimaryWindow,
+};
 use bevy_egui::{
     EguiContextPass, EguiContexts, EguiPlugin,
     egui::{self, Slider, style::HandleShape},
 };
 use itertools::Itertools;
+use kiddo::{KdTree, traits::DistanceMetric};
 use rand::prelude::*;
 
 #[derive(Component)]
@@ -33,14 +36,25 @@ struct BoidsParameters {
     min_velocity: f32,
 }
 
+// type KdTree = kiddo::float::kdtree::KdTree<f32, u32, 2, 32, u32>;
+
+#[derive(Resource)]
+struct BoidKdTree(KdTree<f32, 2>);
+
 const BOID_SIZE: f32 = 3.0;
+const WINDOW_SIZE: f32 = 800.0;
+const TOROIDAL_SIZE: f32 = WINDOW_SIZE + BOID_SIZE * 2.0;
 
 fn main() {
+    std::panic::set_hook(Box::new(|info| {
+        eprintln!("panic occurred: {info}");
+    }));
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Boids".into(),
-                resolution: (800., 600.).into(),
+                resolution: (WINDOW_SIZE, WINDOW_SIZE).into(),
+                resizable: false,
                 ..default()
             }),
             ..default()
@@ -58,11 +72,14 @@ fn main() {
             speed: 25.0,
             min_velocity: 0.5,
         })
+        .insert_resource(BoidKdTree(KdTree::new()))
         .add_systems(Startup, setup_camera)
         .add_systems(Startup, spawn_boids)
         .add_systems(EguiContextPass, egui_system)
-        .add_systems(Update, update_boids)
-        .add_systems(Update, wrap_boids)
+        .add_systems(
+            Update,
+            (update_boids.after(build_kd_tree), wrap_boids, build_kd_tree),
+        )
         .run();
 }
 
@@ -75,8 +92,8 @@ fn spawn_boids(mut commands: Commands, boids_parameters: Res<BoidsParameters>) {
 
     for _ in 0..boids_parameters.num_boids {
         let position = Vec3::new(
-            rng.gen_range(-400.0..400.0),
-            rng.gen_range(-300.0..300.0),
+            rng.gen_range(-WINDOW_SIZE / 2.0..WINDOW_SIZE / 2.0),
+            rng.gen_range(-WINDOW_SIZE / 2.0..WINDOW_SIZE / 2.0),
             0.0,
         );
 
@@ -135,64 +152,111 @@ impl Ord for LocalBoid {
     }
 }
 
-// Wrapped distance function
-// Considers boids on either side of the screen to be close
-fn toroidal_distance(a: Vec2, b: Vec2, width: f32, height: f32) -> Vec2 {
-    let z = Vec2::new(
-        (a.x - b.x + width / 2.0).rem_euclid(width) - width / 2.0,
-        (a.y - b.y + height / 2.0).rem_euclid(height) - height / 2.0,
-    );
+struct SquaredToroidal;
 
-    // if z.length_squared() > (width / 2.0).powf(2.0) + (height / 2.0).powf(2.0) + 0.001 {
-    //     dbg!(z.length());
-    //     dbg!(a, b, width, height);
-    //     panic!();
-    // }
+impl DistanceMetric<f32, 2> for SquaredToroidal {
+    // Wrapped distance function
+    // Considers boids on either side of the screen to be close
+    fn dist(a: &[f32; 2], b: &[f32; 2]) -> f32 {
+        Vec2::new(
+            (a[0] - b[0] + TOROIDAL_SIZE / 2.0).rem_euclid(TOROIDAL_SIZE) - TOROIDAL_SIZE / 2.0,
+            (a[1] - b[1] + TOROIDAL_SIZE / 2.0).rem_euclid(TOROIDAL_SIZE) - TOROIDAL_SIZE / 2.0,
+        )
+        .length_squared()
 
-    z
+        // if z.length_squared() > (width / 2.0).powf(2.0) + (height / 2.0).powf(2.0) + 0.001 {
+        //     dbg!(z.length());
+        //     dbg!(a, b, width, height);
+        //     panic!();
+        // }
+    }
+
+    fn dist1(a: f32, b: f32) -> f32 {
+        (a - b + TOROIDAL_SIZE / 2.0).rem_euclid(TOROIDAL_SIZE) - TOROIDAL_SIZE / 2.0
+
+        // Loses sign but is faster, sign not needed for kd pruning?
+        // let delta = (a - b).abs();
+        // let wrap = WINDOW_SIZE.max(WINDOW_SIZE);
+        // delta.min(wrap - delta)
+    }
 }
 
 fn local_n_boid_query(
-    boid: Entity,
-    boid_position: Vec2,
-    positions_and_headings: &[(Entity, Vec2, Vec2)],
+    current_boid: Entity,
+    current_boid_position: Vec2,
+    all_boids: &HashMap<u64, (Vec2, Vec2)>,
     local_distance: f32,
-    screen_width: f32,
-    screen_height: f32,
+    kd_tree: &KdTree<f32, 2>,
 ) -> Vec<LocalBoid> {
-    let local_boids = positions_and_headings
-        .iter()
-        .filter(|(other_entity, _, _)| *other_entity != boid)
-        .map(|(_, other_position, other_heading)| {
-            // Wrap with Reverse as min-heap instead of default max
-            std::cmp::Reverse(LocalBoid {
-                distance: toroidal_distance(
-                    boid_position,
-                    *other_position,
-                    // The actual width and height of the toroidal space extends one boid width on either edge
-                    screen_width + BOID_SIZE * 2.0,
-                    screen_height + BOID_SIZE * 2.0,
-                )
-                .length_squared(),
-                position: *other_position,
-                heading: *other_heading,
-            })
-        });
+    // let local_boids = positions_and_headings
+    //     .iter()
+    //     .filter(|(other_entity, _, _)| *other_entity != boid)
+    //     .map(|(_, other_position, other_heading)| {
+    //         // Wrap with Reverse as min-heap instead of default max
+    //         std::cmp::Reverse(LocalBoid {
+    //             distance: toroidal_distance(
+    //                 boid_position,
+    //                 *other_position,
+    //                 // The actual width and height of the toroidal space extends one boid width on either edge
+    //                 screen_width + BOID_SIZE * 2.0,
+    //                 screen_height + BOID_SIZE * 2.0,
+    //             )
+    //             .length_squared(),
+    //             position: *other_position,
+    //             heading: *other_heading,
+    //         })
+    //     });
 
-    // Construct min-heap
-    let mut binary_heap = BinaryHeap::from_iter(local_boids);
+    // // Construct min-heap
+    // let mut binary_heap = BinaryHeap::from_iter(local_boids);
 
-    let mut local = Vec::new();
+    // let mut local = Vec::new();
 
-    while let Some(std::cmp::Reverse(local_boid)) = binary_heap.pop() {
-        if local_boid.distance <= local_distance {
-            local.push(local_boid);
-        } else {
-            break;
-        }
+    // while let Some(std::cmp::Reverse(local_boid)) = binary_heap.pop() {
+    //     if local_boid.distance <= local_distance {
+    //         local.push(local_boid);
+    //     } else {
+    //         break;
+    //     }
+    // }
+
+    let current_boid_array_position = current_boid_position.to_array();
+
+    let nearest_neighbours = kd_tree
+        .within_unsorted_iter::<SquaredToroidal>(&current_boid_array_position, local_distance);
+
+    nearest_neighbours
+        .filter_map(|neighbour| {
+            if neighbour.item == current_boid.index() as u64 {
+                None
+            } else {
+                all_boids
+                    .get(&neighbour.item)
+                    .map(|(position, heading)| LocalBoid {
+                        distance: neighbour.distance,
+                        heading: *heading,
+                        position: *position,
+                    })
+            }
+        })
+        .collect_vec()
+
+    // local
+}
+
+fn build_kd_tree(
+    mut kd_tree: ResMut<BoidKdTree>,
+    boids_query: Query<(Entity, &Transform), With<Boid>>,
+    boids_parameters: Res<BoidsParameters>,
+) {
+    kd_tree.0 = KdTree::with_capacity(boids_parameters.num_boids);
+
+    for (entity, transform) in boids_query {
+        kd_tree.0.add(
+            &transform.translation.xy().to_array(),
+            entity.index() as u64,
+        )
     }
-
-    local
 }
 
 fn calculate_alignment(
@@ -265,24 +329,24 @@ fn update_boids(
     mut boids_query: Query<(Entity, &mut Transform, &mut Boid)>,
     time: Res<Time>,
     boids_parameters: Res<BoidsParameters>,
-    windows: Query<&Window, With<PrimaryWindow>>,
+    kd_tree: ResMut<BoidKdTree>,
 ) {
     let delta = time.delta_secs();
-    let window = windows.single().expect("No windw1!");
 
-    let positions = boids_query
-        .iter()
-        .map(|(entity, transform, boid)| (entity, transform.translation.xy(), boid.heading))
-        .collect_vec();
+    let all_boids = HashMap::from_iter(boids_query.iter().map(|(entity, transform, boid)| {
+        (
+            entity.index() as u64,
+            (transform.translation.xy(), boid.heading),
+        )
+    }));
 
     for (entity, transform, mut boid) in &mut boids_query {
         let local_query = local_n_boid_query(
             entity,
             transform.translation.xy(),
-            &positions,
+            &all_boids,
             boids_parameters.local_distance,
-            window.width(),
-            window.height(),
+            &kd_tree.0,
         );
 
         let alignment = calculate_alignment(
@@ -318,27 +382,22 @@ fn update_boids(
     }
 }
 
-fn wrap_boids(
-    mut boids_query: Query<&mut Transform, With<Boid>>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-) {
-    let window = windows.single().expect("no window!!");
-
+fn wrap_boids(mut boids_query: Query<&mut Transform, With<Boid>>) {
     for mut boid in &mut boids_query {
-        if boid.translation.x < -window.width() / 2.0 - BOID_SIZE {
-            boid.translation.x += window.width() + BOID_SIZE * 2.0;
+        if boid.translation.x < -WINDOW_SIZE / 2.0 - BOID_SIZE {
+            boid.translation.x += WINDOW_SIZE + BOID_SIZE * 2.0;
         }
 
-        if boid.translation.x > window.width() / 2.0 + BOID_SIZE {
-            boid.translation.x -= window.width() + BOID_SIZE * 2.0;
+        if boid.translation.x > WINDOW_SIZE / 2.0 + BOID_SIZE {
+            boid.translation.x -= WINDOW_SIZE + BOID_SIZE * 2.0;
         }
 
-        if boid.translation.y < -window.height() / 2.0 - BOID_SIZE {
-            boid.translation.y += window.height() + BOID_SIZE * 2.0;
+        if boid.translation.y < -WINDOW_SIZE / 2.0 - BOID_SIZE {
+            boid.translation.y += WINDOW_SIZE + BOID_SIZE * 2.0;
         }
 
-        if boid.translation.y > window.height() / 2.0 + BOID_SIZE {
-            boid.translation.y -= window.height() + BOID_SIZE * 2.0;
+        if boid.translation.y > WINDOW_SIZE / 2.0 + BOID_SIZE {
+            boid.translation.y -= WINDOW_SIZE + BOID_SIZE * 2.0;
         }
     }
 }
