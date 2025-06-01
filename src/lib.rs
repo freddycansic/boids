@@ -66,15 +66,14 @@ pub fn run() {
             separation_factor: 1.5,
             separation_threshold: 200.0,
             local_distance: 850.0,
-            num_boids: 10,
+            num_boids: 1000,
             speed: 25.0,
             min_velocity: 0.5,
         })
         .insert_resource(BoidKdTree(KdTree::new()))
         .add_systems(Startup, (spawn_boids, setup_camera))
-        // .add_systems(Startup, spawn_boids)
         .add_systems(EguiContextPass, egui_system)
-        .add_systems(Update, ((update_boids, build_kd_tree).chain(), wrap_boids))
+        .add_systems(Update, ((build_kd_tree, update_boids).chain(), wrap_boids))
         .run();
 }
 
@@ -371,6 +370,7 @@ fn egui_system(
     mut commands: Commands,
     boids_query: Query<Entity, With<Boid>>,
     diagnostics: Res<DiagnosticsStore>,
+    mut exit: EventWriter<AppExit>,
 ) {
     egui::Window::new("Boids").show(contexts.ctx_mut(), |ui| {
         ui.label("Performance Statistics");
@@ -444,6 +444,12 @@ fn egui_system(
             }
 
             spawn_boids(commands, boids_parameters.into());
+        }
+
+        ui.separator();
+
+        if ui.button("Exit").clicked() {
+            exit.write(AppExit::Success);
         }
     });
 }

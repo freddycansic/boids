@@ -22,11 +22,54 @@ name = "toroidal_distance"
 harness = false
 
 [dependencies]
-bevy = "0.16.0"
+bevy = { version = "0.16.0", default-features = false, features = [
+    # "android-game-activity",
+    # "android_shared_stdcxx",
+    "animation",
+    "async_executor",
+    "bevy_asset",
+    # "bevy_audio",
+    "bevy_color",
+    "bevy_core_pipeline",
+    # "bevy_gilrs",
+    # "bevy_gizmos",
+    # "bevy_gltf",
+    "bevy_input_focus",
+    "bevy_log",
+    # "bevy_mesh_picking_backend",
+    # "bevy_pbr",
+    # "bevy_picking",
+    "bevy_render",
+    "bevy_scene",
+    "bevy_sprite",
+    # "bevy_sprite_picking_backend",
+    "bevy_state",
+    # "bevy_text",
+    "bevy_ui",
+    "bevy_ui_picking_backend",
+    "bevy_window",
+    "bevy_winit",
+    "custom_cursor",
+    "default_font",
+    # "hdr",
+    "multi_threaded",
+    # "png",
+    # "smaa_luts",
+    "std",
+    "sysinfo_plugin",
+    # "tonemapping_luts",
+    # "vorbis",
+    "webgl2",
+    "x11",
+] }
 bevy_egui = "0.34.1"
 itertools = "0.14.0"
 kiddo = "5.0.3"
 rand = "0.8.5"
+log = { version = "*", features = [
+    "max_level_debug",
+    "release_max_level_warn",
+] }
 
 [dev-dependencies]
 criterion = "0.5"
