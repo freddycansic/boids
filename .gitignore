@@ -1,3 +1,6 @@
 /target
 flamegraph.svg
 boids.exe
+perf.data
+perf.data.old
+out.perf
