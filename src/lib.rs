@@ -166,10 +166,7 @@ fn build_kd_tree(
     boids_parameters: Res<BoidsParameters>,
 ) {
     kd_tree.0 = KdTree::with_capacity(boids_parameters.num_boids);
-    // dbg!(boids_parameters.num_boids);
     for (entity, transform) in boids_query {
-        // dbg!(transform.translation.xy());
-        // dbg!(entity.index());
         kd_tree.0.add(
             &transform.translation.xy().to_array(),
             entity.index() as u64,
