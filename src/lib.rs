@@ -2,15 +2,17 @@ mod squared_toroidal;
 
 use bevy::{
     diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
+    ecs::entity::EntityHashSet,
     platform::collections::HashMap,
     prelude::*,
+    window::PrimaryWindow,
 };
 use bevy_egui::{
     EguiContextPass, EguiContexts, EguiPlugin,
     egui::{self, Slider, style::HandleShape},
 };
 use itertools::Itertools;
-use kiddo::KdTree;
+use kiddo::{KdTree, SquaredEuclidean};
 use rand::prelude::*;
 
 use crate::squared_toroidal::SquaredToroidal;
@@ -37,10 +39,10 @@ struct BoidsParameters {
     local_distance: f32,
     num_boids: usize,
     speed: f32,
+    repulsion_factor: f32,
+    repulsion_distance: f32,
     min_velocity: f32,
 }
-
-// type KdTree = kiddo::float::kdtree::KdTree<f32, u32, 2, 32, u32>;
 
 #[derive(Resource)]
 struct BoidKdTree(KdTree<f32, 2>);
@@ -69,8 +71,10 @@ pub fn run() {
             cohesion_factor: 0.5,
             separation_factor: 1.5,
             separation_threshold: 200.0,
-            local_distance: 850.0,
+            local_distance: 400.0,
             num_boids: 1000,
+            repulsion_factor: 3.0,
+            repulsion_distance: 500.0,
             speed: 25.0,
             min_velocity: 0.5,
         })
@@ -245,6 +249,7 @@ fn update_boids(
     time: Res<Time>,
     boids_parameters: Res<BoidsParameters>,
     kd_tree: Res<BoidKdTree>,
+    windows: Query<&Window, With<PrimaryWindow>>,
 ) {
     let delta = time.delta_secs();
 
@@ -254,6 +259,30 @@ fn update_boids(
             (transform.translation.xy(), boid.heading),
         )
     }));
+
+    let mouse_position = windows.single().ok().and_then(|window| {
+        window.cursor_position().map(|mouse_position| {
+            Vec2::new(
+                mouse_position.x - WINDOW_SIZE / 2.0,
+                -mouse_position.y + WINDOW_SIZE / 2.0,
+            )
+        })
+    });
+
+    let boids_near_cursor = if let Some(mouse_position) = mouse_position {
+        let mouse_position_array = mouse_position.to_array();
+        EntityHashSet::from_iter(
+            kd_tree
+                .0
+                .within_unsorted_iter::<SquaredEuclidean>(
+                    &mouse_position_array,
+                    boids_parameters.repulsion_distance,
+                )
+                .map(|neighbour| Entity::from_raw(neighbour.item as u32)),
+        )
+    } else {
+        EntityHashSet::new()
+    };
 
     boids_query
         .par_iter_mut()
@@ -285,7 +314,18 @@ fn update_boids(
                 boids_parameters.separation_threshold,
             );
 
-            boid.heading += (alignment + cohesion + separation).normalize() * delta;
+            let repulsion = if let Some(mouse_position) = mouse_position {
+                if boids_near_cursor.contains(&entity) {
+                    (transform.translation.xy() - mouse_position).normalize()
+                        * boids_parameters.repulsion_factor
+                } else {
+                    Vec2::splat(0.0)
+                }
+            } else {
+                Vec2::splat(0.0)
+            };
+
+            boid.heading += ((alignment + cohesion + separation).normalize() + repulsion) * delta;
             // Min velocity
             boid.heading = boid.heading.clamp_length_min(boids_parameters.min_velocity);
 
@@ -343,10 +383,24 @@ fn egui_system(
                 .text("Num boids"),
         );
         ui.add(
-            Slider::new(&mut boids_parameters.speed, 1.0..=100.0)
-                .step_by(5.0)
+            Slider::new(&mut boids_parameters.speed, 1.0..=500.0)
                 .handle_shape(HandleShape::Rect { aspect_ratio: 0.35 })
                 .text("Speed"),
+        );
+        ui.add(
+            Slider::new(&mut boids_parameters.repulsion_factor, 0.0..=5.0)
+                .step_by(0.2)
+                .handle_shape(HandleShape::Rect { aspect_ratio: 0.35 })
+                .text("Repulsion factor"),
+        );
+        ui.add(
+            Slider::new(
+                &mut boids_parameters.repulsion_distance,
+                0.0..=(WINDOW_SIZE / 2.0 * WINDOW_SIZE / 2.0),
+            )
+            .step_by(10.0)
+            .handle_shape(HandleShape::Rect { aspect_ratio: 0.35 })
+            .text("Repulsion distance"),
         );
 
         ui.separator();
