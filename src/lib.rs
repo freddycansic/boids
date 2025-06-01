@@ -1,3 +1,5 @@
+mod squared_toroidal;
+
 use bevy::{
     diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
     platform::collections::HashMap,
@@ -8,8 +10,10 @@ use bevy_egui::{
     egui::{self, Slider, style::HandleShape},
 };
 use itertools::Itertools;
-use kiddo::{KdTree, traits::DistanceMetric};
+use kiddo::KdTree;
 use rand::prelude::*;
+
+use crate::squared_toroidal::SquaredToroidal;
 
 #[derive(Component)]
 struct Boid {
@@ -85,7 +89,7 @@ fn spawn_boids(mut commands: Commands, boids_parameters: Res<BoidsParameters>) {
     let mut rng = rand::thread_rng();
 
     for _ in 0..boids_parameters.num_boids {
-        let position = Vec3::new(
+        let translation = Vec3::new(
             rng.gen_range(-WINDOW_SIZE / 2.0..WINDOW_SIZE / 2.0),
             rng.gen_range(-WINDOW_SIZE / 2.0..WINDOW_SIZE / 2.0),
             0.0,
@@ -111,7 +115,7 @@ fn spawn_boids(mut commands: Commands, boids_parameters: Res<BoidsParameters>) {
                 ..default()
             },
             Transform {
-                translation: position,
+                translation,
                 rotation: boid.quaternion_heading(),
                 ..Default::default()
             },
@@ -125,56 +129,6 @@ struct LocalBoid {
     heading: Vec2,
     position: Vec2,
     distance: f32,
-}
-
-impl PartialEq for LocalBoid {
-    fn eq(&self, other: &Self) -> bool {
-        self.distance == other.distance
-    }
-}
-impl Eq for LocalBoid {}
-
-impl PartialOrd for LocalBoid {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.distance.partial_cmp(&other.distance)
-    }
-}
-impl Ord for LocalBoid {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other)
-            .expect(format!("NaN DETECTED!!! {:?} {:?}", self, other).as_str())
-    }
-}
-
-pub struct SquaredToroidal;
-
-fn wrap_delta(delta: f32, size: f32) -> f32 {
-    let half = size * 0.5;
-    if delta < -half {
-        delta + size
-    } else if delta > half {
-        delta - size
-    } else {
-        delta
-    }
-}
-
-// Considers boids on either side of the screen to be close
-impl DistanceMetric<f32, 2> for SquaredToroidal {
-    fn dist(a: &[f32; 2], b: &[f32; 2]) -> f32 {
-        let dx = wrap_delta(a[0] - b[0], TOROIDAL_SIZE);
-        let dy = wrap_delta(a[1] - b[1], TOROIDAL_SIZE);
-        dx * dx + dy * dy
-    }
-
-    fn dist1(a: f32, b: f32) -> f32 {
-        (a - b + TOROIDAL_SIZE / 2.0).rem_euclid(TOROIDAL_SIZE) - TOROIDAL_SIZE / 2.0
-
-        // Loses sign but is faster, sign not needed for kd pruning?
-        // let delta = (a - b).abs();
-        // let wrap = WINDOW_SIZE.max(WINDOW_SIZE);
-        // delta.min(wrap - delta)
-    }
 }
 
 fn local_n_boid_query(
