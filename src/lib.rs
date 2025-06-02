@@ -1,10 +1,14 @@
 mod squared_toroidal;
 
+use std::time::Duration;
+
 use bevy::{
     diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
     ecs::entity::EntityHashSet,
     platform::collections::HashMap,
     prelude::*,
+    render::render_resource::{AsBindGroup, ShaderRef},
+    sprite::{Material2d, Material2dPlugin},
     window::PrimaryWindow,
 };
 use bevy_egui::{
@@ -47,21 +51,36 @@ struct BoidsParameters {
 #[derive(Resource)]
 struct BoidKdTree(KdTree<f32, 2>);
 
-const BOID_SIZE: f32 = 3.0;
+#[derive(Event)]
+struct SpawnBoidsEvent;
+
+const BOID_SIZE: f32 = 10.0;
 const WINDOW_SIZE: f32 = 800.0;
 pub const TOROIDAL_SIZE: f32 = WINDOW_SIZE + BOID_SIZE * 2.0;
 
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+struct CloudMaterial {}
+
+impl Material2d for CloudMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/clouds.wgsl".into()
+    }
+}
+
 pub fn run() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Boids".into(),
-                resolution: (WINDOW_SIZE, WINDOW_SIZE).into(),
-                resizable: false,
+        .add_plugins((
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "Boids".into(),
+                    resolution: (WINDOW_SIZE, WINDOW_SIZE).into(),
+                    resizable: false,
+                    ..default()
+                }),
                 ..default()
             }),
-            ..default()
-        }))
+            Material2dPlugin::<CloudMaterial>::default(),
+        ))
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(EguiPlugin {
             enable_multipass_for_primary_context: true,
@@ -79,9 +98,18 @@ pub fn run() {
             min_velocity: 0.5,
         })
         .insert_resource(BoidKdTree(KdTree::new()))
-        .add_systems(Startup, (spawn_boids, setup_camera))
+        .add_event::<SpawnBoidsEvent>()
+        .add_systems(Startup, (spawn_clouds, spawn_boids, setup_camera))
         .add_systems(EguiContextPass, egui_system)
-        .add_systems(Update, ((build_kd_tree, update_boids).chain(), wrap_boids))
+        .add_systems(
+            Update,
+            (
+                (build_kd_tree, update_boids).chain(),
+                wrap_boids,
+                spawn_boids_on_event,
+                animate_sprite,
+            ),
+        )
         .run();
 }
 
@@ -89,8 +117,63 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2d::default());
 }
 
-fn spawn_boids(mut commands: Commands, boids_parameters: Res<BoidsParameters>) {
+fn spawn_clouds(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<CloudMaterial>>,
+) {
+    commands.spawn((
+        Mesh2d(meshes.add(Rectangle::new(WINDOW_SIZE, WINDOW_SIZE))),
+        MeshMaterial2d(materials.add(CloudMaterial {})),
+    ));
+}
+
+#[derive(Component, Clone)]
+struct AnimationConfig {
+    first: usize,
+    last: usize,
+    timer: Timer,
+}
+
+fn spawn_boids_on_event(
+    mut spawn_boids_reader: EventReader<SpawnBoidsEvent>,
+    commands: Commands,
+    boids_parameters: Res<BoidsParameters>,
+    asset_server: Res<AssetServer>,
+    texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
+) {
+    if !spawn_boids_reader.is_empty() {
+        spawn_boids(
+            commands,
+            boids_parameters,
+            asset_server,
+            texture_atlas_layouts,
+        );
+        spawn_boids_reader.clear();
+    }
+}
+
+fn spawn_boids(
+    mut commands: Commands,
+    boids_parameters: Res<BoidsParameters>,
+    asset_server: Res<AssetServer>,
+    mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
+) {
     let mut rng = rand::thread_rng();
+
+    let texture = asset_server.load("textures/birds.png");
+    let layout = TextureAtlasLayout::from_grid(UVec2::splat(120), 10, 1, None, None);
+    let texture_atlas_layout = texture_atlas_layouts.add(layout);
+
+    let fps = 10.0;
+    let animation_config = AnimationConfig {
+        first: 0,
+        last: 9,
+        timer: Timer::new(
+            Duration::from_secs_f32(1.0 / (fps as f32)),
+            TimerMode::Repeating,
+        ),
+    };
 
     for _ in 0..boids_parameters.num_boids {
         let translation = Vec3::new(
@@ -109,12 +192,18 @@ fn spawn_boids(mut commands: Commands, boids_parameters: Res<BoidsParameters>) {
 
         commands.spawn((
             Sprite {
-                color: Srgba::rgb(
-                    rng.gen_range(0.5..1.0),
-                    rng.gen_range(0.5..1.0),
-                    rng.gen_range(0.5..1.0),
-                )
-                .into(),
+                // color: Srgba::rgb(
+                //     // rng.gen_range(0.5..1.0),
+                //     // rng.gen_range(0.5..1.0),
+                //     // rng.gen_range(0.5..1.0),
+                //     0.0, 0.0, 0.0,
+                // )
+                image: texture.clone(),
+                texture_atlas: Some(TextureAtlas {
+                    layout: texture_atlas_layout.clone(),
+                    index: rng.gen_range(0..=9),
+                    // index: animation_config.first,
+                }),
                 custom_size: Some(Vec2::splat(BOID_SIZE)),
                 ..default()
             },
@@ -123,8 +212,25 @@ fn spawn_boids(mut commands: Commands, boids_parameters: Res<BoidsParameters>) {
                 rotation: boid.quaternion_heading(),
                 ..Default::default()
             },
+            animation_config.clone(),
             boid,
         ));
+    }
+}
+
+fn animate_sprite(time: Res<Time>, mut query: Query<(&mut AnimationConfig, &mut Sprite)>) {
+    for (mut animation_config, mut sprite) in &mut query {
+        animation_config.timer.tick(time.delta());
+
+        if animation_config.timer.just_finished() {
+            if let Some(atlas) = &mut sprite.texture_atlas {
+                atlas.index = if atlas.index == animation_config.last {
+                    animation_config.first
+                } else {
+                    atlas.index + 1
+                };
+            }
+        }
     }
 }
 
@@ -144,10 +250,9 @@ fn local_n_boid_query(
 ) -> Vec<LocalBoid> {
     let current_boid_array_position = current_boid_position.to_array();
 
-    let nearest_neighbours = kd_tree
-        .within_unsorted_iter::<SquaredToroidal>(&current_boid_array_position, local_distance);
-
-    nearest_neighbours
+    kd_tree
+        .within_unsorted::<SquaredToroidal>(&current_boid_array_position, local_distance)
+        .into_iter()
         .filter_map(|neighbour| {
             if neighbour.item == current_boid.index() as u64 {
                 None
@@ -274,10 +379,11 @@ fn update_boids(
         EntityHashSet::from_iter(
             kd_tree
                 .0
-                .within_unsorted_iter::<SquaredEuclidean>(
+                .within_unsorted::<SquaredEuclidean>(
                     &mouse_position_array,
                     boids_parameters.repulsion_distance,
                 )
+                .into_iter()
                 .map(|neighbour| Entity::from_raw(neighbour.item as u32)),
         )
     } else {
@@ -361,7 +467,8 @@ fn egui_system(
     mut commands: Commands,
     boids_query: Query<Entity, With<Boid>>,
     diagnostics: Res<DiagnosticsStore>,
-    mut exit: EventWriter<AppExit>,
+    mut exit_writer: EventWriter<AppExit>,
+    mut spawn_boids_writer: EventWriter<SpawnBoidsEvent>,
 ) {
     egui::Window::new("Boids").show(contexts.ctx_mut(), |ui| {
         ui.label("Performance Statistics");
@@ -448,13 +555,13 @@ fn egui_system(
                 commands.entity(entity).despawn();
             }
 
-            spawn_boids(commands, boids_parameters.into());
+            spawn_boids_writer.write(SpawnBoidsEvent);
         }
 
         ui.separator();
 
         if ui.button("Exit").clicked() {
-            exit.write(AppExit::Success);
+            exit_writer.write(AppExit::Success);
         }
     });
 }

@@ -1,0 +1,22 @@
+[
+    {
+        "label": "build for profiling",
+        "command": "cargo build +nightly -Zcodegen-backend",
+        "env": {
+            "RUSTFLAGS": "-Clinker=clang -Clink-arg=--ld-path=/usr/bin/mold -Clink-arg=-Wl,--no-rosegment -Zshare-generics=y",
+            "CARGO_PROFILE_DEV_CODEGEN_BACKEND": "cranelift"
+        }
+    },
+    {
+        "label": "run dev",
+        "command": "cargo run +nightly -Zcodegen-backend",
+        "env": {
+            "RUSTFLAGS": "-Clinker=clang -Clink-arg=--ld-path=/usr/bin/mold -Clink-arg=-Wl,--no-rosegment -Zshare-generics=y",
+            "CARGO_PROFILE_DEV_CODEGEN_BACKEND": "cranelift"
+        }
+    },
+    {
+        "label": "run wasm",
+        "command": "cargo run --target wasm32-unknown-unknown"
+    }
+]
