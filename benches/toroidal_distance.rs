@@ -1,4 +1,4 @@
-use boids::{SquaredToroidal, TOROIDAL_SIZE};
+use boids::{TOROIDAL_SIZE, squared_toroidal::SquaredToroidal};
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use kiddo::traits::DistanceMetric;
 

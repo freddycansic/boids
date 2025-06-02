@@ -1,4 +1,4 @@
-mod squared_toroidal;
+pub mod squared_toroidal;
 
 use std::time::Duration;
 
@@ -114,7 +114,7 @@ pub fn run() {
 }
 
 fn setup_camera(mut commands: Commands) {
-    commands.spawn(Camera2d::default());
+    commands.spawn(Camera2d);
 }
 
 fn spawn_clouds(
@@ -192,17 +192,10 @@ fn spawn_boids(
 
         commands.spawn((
             Sprite {
-                // color: Srgba::rgb(
-                //     // rng.gen_range(0.5..1.0),
-                //     // rng.gen_range(0.5..1.0),
-                //     // rng.gen_range(0.5..1.0),
-                //     0.0, 0.0, 0.0,
-                // )
                 image: texture.clone(),
                 texture_atlas: Some(TextureAtlas {
                     layout: texture_atlas_layout.clone(),
                     index: rng.gen_range(0..=9),
-                    // index: animation_config.first,
                 }),
                 custom_size: Some(Vec2::splat(BOID_SIZE)),
                 ..default()
@@ -222,14 +215,14 @@ fn animate_sprite(time: Res<Time>, mut query: Query<(&mut AnimationConfig, &mut 
     for (mut animation_config, mut sprite) in &mut query {
         animation_config.timer.tick(time.delta());
 
-        if animation_config.timer.just_finished() {
-            if let Some(atlas) = &mut sprite.texture_atlas {
-                atlas.index = if atlas.index == animation_config.last {
-                    animation_config.first
-                } else {
-                    atlas.index + 1
-                };
-            }
+        if animation_config.timer.just_finished()
+            && let Some(atlas) = &mut sprite.texture_atlas
+        {
+            atlas.index = if atlas.index == animation_config.last {
+                animation_config.first
+            } else {
+                atlas.index + 1
+            };
         }
     }
 }
@@ -284,7 +277,7 @@ fn build_kd_tree(
 }
 
 fn calculate_alignment(
-    local_query: &Vec<LocalBoid>,
+    local_query: &[LocalBoid],
     boid_heading: Vec2,
     alignment_factor: f32,
 ) -> Vec2 {
@@ -300,7 +293,7 @@ fn calculate_alignment(
 }
 
 fn calculate_cohesion(
-    local_query: &Vec<LocalBoid>,
+    local_query: &[LocalBoid],
     boid_position: Vec2,
     cohesion_factor: f32,
 ) -> Vec2 {
@@ -317,7 +310,7 @@ fn calculate_cohesion(
 }
 
 fn calculate_separation(
-    local_query: &Vec<LocalBoid>,
+    local_query: &[LocalBoid],
     boid_position: Vec2,
     separation_factor: f32,
     separation_threshold: f32,
@@ -354,7 +347,7 @@ fn update_boids(
     time: Res<Time>,
     boids_parameters: Res<BoidsParameters>,
     kd_tree: Res<BoidKdTree>,
-    windows: Query<&Window, With<PrimaryWindow>>,
+    window: Single<&Window, With<PrimaryWindow>>,
 ) {
     let delta = time.delta_secs();
 
@@ -365,13 +358,11 @@ fn update_boids(
         )
     }));
 
-    let mouse_position = windows.single().ok().and_then(|window| {
-        window.cursor_position().map(|mouse_position| {
-            Vec2::new(
-                mouse_position.x - WINDOW_SIZE / 2.0,
-                -mouse_position.y + WINDOW_SIZE / 2.0,
-            )
-        })
+    let mouse_position = window.cursor_position().map(|mouse_position| {
+        Vec2::new(
+            mouse_position.x - WINDOW_SIZE / 2.0,
+            -mouse_position.y + WINDOW_SIZE / 2.0,
+        )
     });
 
     let boids_near_cursor = if let Some(mouse_position) = mouse_position {
