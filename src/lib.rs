@@ -1,3 +1,4 @@
+mod clouds;
 pub mod squared_toroidal;
 
 use std::time::Duration;
@@ -7,8 +8,6 @@ use bevy::{
     ecs::entity::EntityHashSet,
     platform::collections::HashMap,
     prelude::*,
-    render::render_resource::{AsBindGroup, ShaderRef},
-    sprite::{Material2d, Material2dPlugin},
     window::PrimaryWindow,
 };
 use bevy_egui::{
@@ -19,6 +18,7 @@ use itertools::Itertools;
 use kiddo::{KdTree, SquaredEuclidean};
 use rand::prelude::*;
 
+use crate::clouds::CloudPlugin;
 use crate::squared_toroidal::SquaredToroidal;
 
 #[derive(Component)]
@@ -58,48 +58,37 @@ const BOID_SIZE: f32 = 10.0;
 const WINDOW_SIZE: f32 = 800.0;
 pub const TOROIDAL_SIZE: f32 = WINDOW_SIZE + BOID_SIZE * 2.0;
 
-#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
-struct CloudMaterial {}
-
-impl Material2d for CloudMaterial {
-    fn fragment_shader() -> ShaderRef {
-        "shaders/clouds.wgsl".into()
-    }
-}
-
 pub fn run() {
     App::new()
-        .add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: "Boids".into(),
-                    resolution: (WINDOW_SIZE, WINDOW_SIZE).into(),
-                    resizable: false,
-                    ..default()
-                }),
+        .add_plugins((DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "Boids".into(),
+                resolution: (WINDOW_SIZE, WINDOW_SIZE).into(),
+                resizable: false,
                 ..default()
             }),
-            Material2dPlugin::<CloudMaterial>::default(),
-        ))
+            ..default()
+        }),))
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(EguiPlugin {
             enable_multipass_for_primary_context: true,
         })
+        .add_plugins(CloudPlugin)
         .insert_resource(BoidsParameters {
             alignment_factor: 1.0,
             cohesion_factor: 0.5,
             separation_factor: 1.5,
-            separation_threshold: 200.0,
+            separation_threshold: 100.0,
             local_distance: 400.0,
             num_boids: 1000,
             repulsion_factor: 3.0,
-            repulsion_distance: 500.0,
-            speed: 25.0,
+            repulsion_distance: 1000.0,
+            speed: 100.0,
             min_velocity: 0.5,
         })
         .insert_resource(BoidKdTree(KdTree::new()))
         .add_event::<SpawnBoidsEvent>()
-        .add_systems(Startup, (spawn_clouds, spawn_boids, setup_camera))
+        .add_systems(Startup, (spawn_boids, setup_camera))
         .add_systems(EguiContextPass, egui_system)
         .add_systems(
             Update,
@@ -115,17 +104,6 @@ pub fn run() {
 
 fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2d);
-}
-
-fn spawn_clouds(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<CloudMaterial>>,
-) {
-    commands.spawn((
-        Mesh2d(meshes.add(Rectangle::new(WINDOW_SIZE, WINDOW_SIZE))),
-        MeshMaterial2d(materials.add(CloudMaterial {})),
-    ));
 }
 
 #[derive(Component, Clone)]
@@ -480,11 +458,13 @@ fn egui_system(
                 .handle_shape(HandleShape::Rect { aspect_ratio: 0.35 })
                 .text("Num boids"),
         );
+
         ui.add(
             Slider::new(&mut boids_parameters.speed, 1.0..=500.0)
                 .handle_shape(HandleShape::Rect { aspect_ratio: 0.35 })
                 .text("Speed"),
         );
+
         ui.add(
             Slider::new(&mut boids_parameters.repulsion_factor, 0.0..=5.0)
                 .step_by(0.2)
