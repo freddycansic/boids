@@ -74,6 +74,7 @@ pub fn run() {
             enable_multipass_for_primary_context: true,
         })
         .add_plugins(CloudPlugin)
+        .insert_resource(ClearColor(Color::srgb(0.5, 0.7, 0.85)))
         .insert_resource(BoidsParameters {
             alignment_factor: 1.0,
             cohesion_factor: 0.5,
@@ -157,7 +158,8 @@ fn spawn_boids(
         let translation = Vec3::new(
             rng.gen_range(-WINDOW_SIZE / 2.0..WINDOW_SIZE / 2.0),
             rng.gen_range(-WINDOW_SIZE / 2.0..WINDOW_SIZE / 2.0),
-            0.0,
+            rng.gen_range(-0.1..0.1),
+            // 1.0,
         );
 
         let boid = Boid {
