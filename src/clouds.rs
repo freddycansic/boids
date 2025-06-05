@@ -17,7 +17,8 @@ pub struct CloudPlugin;
 
 impl Plugin for CloudPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(Material2dPlugin::<CloudMaterial>::default())
+        app.add_plugins(Material2dPlugin::<BackgroundCloudMaterial>::default())
+            .add_plugins(Material2dPlugin::<OverlayCloudMaterial>::default())
             .add_systems(Startup, spawn_clouds)
             .add_systems(Update, animate_clouds);
     }
@@ -30,14 +31,26 @@ struct PaddedOffset {
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
-struct CloudMaterial {
+struct BackgroundCloudMaterial {
     #[uniform(0)]
     padded_offset: PaddedOffset,
 }
 
-impl Material2d for CloudMaterial {
+impl Material2d for BackgroundCloudMaterial {
     fn fragment_shader() -> ShaderRef {
-        "shaders/clouds.wgsl".into()
+        "shaders/cloud_background.wgsl".into()
+    }
+}
+
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+struct OverlayCloudMaterial {
+    #[uniform(0)]
+    padded_offset: PaddedOffset,
+}
+
+impl Material2d for OverlayCloudMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/cloud_overlay.wgsl".into()
     }
 
     fn alpha_mode(&self) -> AlphaMode2d {
@@ -65,30 +78,50 @@ struct Clouds;
 fn spawn_clouds(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<CloudMaterial>>,
+    mut background_material: ResMut<Assets<BackgroundCloudMaterial>>,
+    mut overlay_material: ResMut<Assets<OverlayCloudMaterial>>,
 ) {
     commands.spawn((
         Mesh2d(meshes.add(Rectangle::new(WINDOW_SIZE, WINDOW_SIZE))),
-        MeshMaterial2d(materials.add(CloudMaterial {
+        MeshMaterial2d(background_material.add(BackgroundCloudMaterial {
             padded_offset: PaddedOffset {
                 offset: 0.0,
                 _padding: Vec3::splat(0.0),
             },
         })),
-        Transform::from_xyz(0.0, 0.0, 0.0),
+        Transform::from_xyz(0.0, 0.0, -1.0),
+        Clouds,
+    ));
+
+    commands.spawn((
+        Mesh2d(meshes.add(Rectangle::new(WINDOW_SIZE, WINDOW_SIZE))),
+        MeshMaterial2d(overlay_material.add(OverlayCloudMaterial {
+            padded_offset: PaddedOffset {
+                offset: 0.0,
+                _padding: Vec3::splat(0.0),
+            },
+        })),
+        Transform::from_xyz(0.0, 0.0, 1.0),
         Clouds,
     ));
 }
 
 fn animate_clouds(
-    mut cloud_material: ResMut<Assets<CloudMaterial>>,
-    cloud: Single<&MeshMaterial2d<CloudMaterial>, With<Clouds>>,
+    mut background_cloud_material: ResMut<Assets<BackgroundCloudMaterial>>,
+    background_cloud: Single<&MeshMaterial2d<BackgroundCloudMaterial>, With<Clouds>>,
+    mut overlay_cloud_material: ResMut<Assets<OverlayCloudMaterial>>,
+    overlay_cloud: Single<&MeshMaterial2d<OverlayCloudMaterial>, With<Clouds>>,
     time: Res<Time>,
     boids_parameters: Res<BoidsParameters>,
 ) {
     const CLOUD_SPEED: f32 = 1.0 / 50.0;
+    let timestep = boids_parameters.speed * time.delta_secs() * CLOUD_SPEED;
 
-    if let Some(material) = cloud_material.get_mut(cloud.0.id()) {
-        material.padded_offset.offset += boids_parameters.speed * time.delta_secs() * CLOUD_SPEED;
+    if let Some(material) = background_cloud_material.get_mut(background_cloud.0.id()) {
+        material.padded_offset.offset += timestep;
+    }
+
+    if let Some(material) = overlay_cloud_material.get_mut(overlay_cloud.0.id()) {
+        material.padded_offset.offset += timestep;
     }
 }

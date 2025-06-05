@@ -30,8 +30,11 @@ fn noiseSmooth(uv: vec2<f32>) -> vec3<f32> {
 
 @fragment
 fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
-    var uv: vec2<f32> = mesh.uv;
-    let offset: f32 = padded_offset.offset;
+	var uv: vec2<f32> = mesh.uv;
+	let offset: f32 = padded_offset.offset;
+
+	let sky_colour = vec3<f32>(80./255., 175./255., 228./255.);
+	let sky: vec3<f32> = sky_colour * (1. - uv.y + 1.5) / 2.;
 
 	uv.x = uv.x + (offset / 40.);
 	var uv2: vec2<f32> = uv;
@@ -43,10 +46,9 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
 	col = col + (noiseSmooth(uv2 * 16.) * 0.25);
 	col = col + (noiseSmooth(uv3 * 32.) * 0.125);
 	col = col + (noiseSmooth(uv3 * 64.) * 0.0625);
-	col = col / 2.0;
-	col = col * smoothstep(vec3<f32>(0.2), vec3<f32>(0.6), col);
+	col = col / (2.);
+	col *= smoothstep(vec3<f32>(0.2), vec3<f32>(0.6), col);
+	col = mix(vec3<f32>(1. - col / 7.), sky, vec3<f32>(1. - col));
 
-	let cloud_intensity = max(max(col.x, col.y), col.z);
-
-	return vec4<f32>(1.0, 1.0, 1.0, cloud_intensity);
+	return vec4<f32>(vec3<f32>(col), 1.);
 }
