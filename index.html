@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1, user-scalable=no"
+        />
+        <title>Boids simulation</title>
+
+        
+        
+<script type="module">
+import init, * as bindings from './boids_main-122743820348012b.js';
+const wasm = await init({ module_or_path: './boids_main-122743820348012b_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+        <link rel="icon" href="icon.ico" />
+        <link rel="stylesheet" href="./styles-597d90855083f957.css" integrity="sha384-7GZOiJ7WwbJ2PKz3iZ2Vt/NHNz65guUjQZ/uo6o2LYkbO/Al8pImelhUBJCReJw+"/>
+    <link rel="modulepreload" href="./boids_main-122743820348012b.js" crossorigin="anonymous" integrity="sha384-oCJoBf9SqSuOaaEfkBWSJNenr6DdU5Efb8Fy3goI2vdgHOATFiE83qo35V2+M1Zo"><link rel="preload" href="./boids_main-122743820348012b_bg.wasm" crossorigin="anonymous" integrity="sha384-uahDHXyGjqkN6DsJIS+orXPuUGbA1ggLoeDJa0zE81XTv58aN2SyUwTQzyKgCN48" as="fetch" type="application/wasm"></head>
+    <body>
+        <div class="game-container">
+            <div class="lds-dual-ring"></div>
+            <canvas id="bevy">
+                Javascript and support for canvas is required
+            </canvas>
+        </div>
+    </body>
+</html>
