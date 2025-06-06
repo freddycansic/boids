@@ -1,11 +1,10 @@
 use bevy::{
     prelude::*,
     render::{
-        mesh::{MeshVertexBufferLayout, MeshVertexBufferLayoutRef},
+        mesh::MeshVertexBufferLayoutRef,
         render_resource::{
-            AsBindGroup, BlendComponent, BlendFactor, BlendOperation, BlendState, ColorTargetState,
-            ColorWrites, RenderPipelineDescriptor, ShaderRef, ShaderType,
-            SpecializedMeshPipelineError, TextureFormat,
+            AsBindGroup, BlendState, RenderPipelineDescriptor, ShaderRef, ShaderType,
+            SpecializedMeshPipelineError,
         },
     },
     sprite::{AlphaMode2d, Material2d, Material2dKey, Material2dPlugin},

@@ -4,3 +4,5 @@ boids.exe
 perf.data
 perf.data.old
 out.perf
+/pkg
+/dist

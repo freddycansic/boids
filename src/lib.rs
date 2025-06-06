@@ -4,6 +4,7 @@ pub mod squared_toroidal;
 use std::time::Duration;
 
 use bevy::{
+    asset::AssetMetaCheck,
     diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
     ecs::entity::EntityHashSet,
     platform::collections::HashMap,
@@ -60,15 +61,25 @@ pub const TOROIDAL_SIZE: f32 = WINDOW_SIZE + BOID_SIZE * 2.0;
 
 pub fn run() {
     App::new()
-        .add_plugins((DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Boids".into(),
-                resolution: (WINDOW_SIZE, WINDOW_SIZE).into(),
-                resizable: false,
-                ..default()
-            }),
-            ..default()
-        }),))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Boids".into(),
+                        resolution: (WINDOW_SIZE, WINDOW_SIZE).into(),
+                        resizable: false,
+                        #[cfg(target_arch = "wasm32")]
+                        canvas: Some("#bevy".to_owned()),
+                        prevent_default_event_handling: false,
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(AssetPlugin {
+                    meta_check: AssetMetaCheck::Never,
+                    ..default()
+                }),
+        )
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(EguiPlugin {
             enable_multipass_for_primary_context: true,
@@ -104,7 +115,7 @@ pub fn run() {
 }
 
 fn setup_camera(mut commands: Commands) {
-    commands.spawn(Camera2d);
+    commands.spawn((Camera2d, Msaa::Off));
 }
 
 #[derive(Component, Clone)]

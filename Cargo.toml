@@ -5,7 +5,12 @@ edition = "2024"
 
 [lib]
 name = "boids"
+crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
+
+[[bin]]
+name = "boids_main"
+path = "src/main.rs"
 
 [profile.dev]
 opt-level = 1
